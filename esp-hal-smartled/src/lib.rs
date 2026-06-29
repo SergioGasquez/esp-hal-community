@@ -49,7 +49,6 @@ use core::{fmt::Debug, marker::PhantomData, slice::IterMut};
 
 use esp_hal::{
     Async, Blocking,
-    clock::Clocks,
     gpio::{Level, interconnect::PeripheralOutput},
     rmt::{Channel, Error as RmtError, PulseCode, Tx, TxChannelConfig, TxChannelCreator},
 };
@@ -66,6 +65,12 @@ const SK68XX_T0H_NS: u32 = 400; // 300ns per SK6812 datasheet, 400 per WS2812. S
 const SK68XX_T0L_NS: u32 = SK68XX_CODE_PERIOD - SK68XX_T0H_NS;
 const SK68XX_T1H_NS: u32 = 850; // 900ns per SK6812 datasheet, 850 per WS2812. > 550ns is sometimes enough. Some require T1H >= 2 * T0H. Some require > 300ns T1L.
 const SK68XX_T1L_NS: u32 = SK68XX_CODE_PERIOD - SK68XX_T1H_NS;
+
+// Hardcoded (for now) values of the RMT clock.
+#[cfg(feature = "esp32h2")]
+const RMT_CLOCK_MHZ: u32 = 32;
+#[cfg(not(feature = "esp32h2"))]
+const RMT_CLOCK_MHZ: u32 = 80;
 
 /// All types of errors that can happen during the conversion and transmission
 /// of LED commands
@@ -208,7 +213,7 @@ impl<'ch, const BUFFER_SIZE: usize> SmartLedsAdapter<'ch, BUFFER_SIZE, Grb<u8>> 
 
 impl<'ch, const BUFFER_SIZE: usize, Color> SmartLedsAdapter<'ch, BUFFER_SIZE, Color>
 where
-    Color: rgb::ComponentSlice<u8>,
+    Color: rgb::bytemuck::NoUninit,
 {
     /// Create a new adapter object that drives the pin using the RMT channel.
     pub fn new_with_color<C, O>(
@@ -222,13 +227,10 @@ where
     {
         let channel = channel.configure_tx(&led_config()).unwrap().with_pin(pin);
 
-        // Assume the RMT peripheral is set up to use the APB clock
-        let src_clock = Clocks::get().apb_clock.as_mhz();
-
         Self {
             channel: Some(channel),
             rmt_buffer,
-            pulses: led_pulses_for_clock(src_clock),
+            pulses: led_pulses_for_clock(RMT_CLOCK_MHZ),
             color: PhantomData,
         }
     }
@@ -237,7 +239,7 @@ where
 impl<'ch, const BUFFER_SIZE: usize, Color> SmartLedsWrite
     for SmartLedsAdapter<'ch, BUFFER_SIZE, Color>
 where
-    Color: rgb::ComponentSlice<u8>,
+    Color: rgb::bytemuck::NoUninit,
 {
     type Error = LedAdapterError;
     type Color = Color;
@@ -257,7 +259,8 @@ where
         // This will result in an `BufferSizeExceeded` error in case
         // the iterator provides more elements than the buffer can take.
         for item in iterator {
-            convert_to_pulses(item.into().as_slice(), &mut seq_iter, self.pulses)?;
+            let color = item.into();
+            convert_to_pulses(rgb::bytemuck::bytes_of(&color), &mut seq_iter, self.pulses)?;
         }
 
         // Finally, add an end element.
@@ -332,7 +335,7 @@ impl<'ch, const BUFFER_SIZE: usize> SmartLedsAdapterAsync<'ch, BUFFER_SIZE, Grb<
 
 impl<'ch, const BUFFER_SIZE: usize, Color> SmartLedsAdapterAsync<'ch, BUFFER_SIZE, Color>
 where
-    Color: rgb::ComponentSlice<u8>,
+    Color: rgb::bytemuck::NoUninit,
 {
     /// Create a new adapter object that drives the pin using the RMT channel.
     pub fn new_with_color<C, O>(
@@ -346,13 +349,10 @@ where
     {
         let channel = channel.configure_tx(&led_config()).unwrap().with_pin(pin);
 
-        // Assume the RMT peripheral is set up to use the APB clock
-        let src_clock = Clocks::get().apb_clock.as_mhz();
-
         Self {
             channel,
             rmt_buffer,
-            pulses: led_pulses_for_clock(src_clock),
+            pulses: led_pulses_for_clock(RMT_CLOCK_MHZ),
             color: PhantomData,
         }
     }
@@ -368,7 +368,8 @@ where
         // This will result in an `BufferSizeExceeded` error in case
         // the iterator provides more elements than the buffer can take.
         for item in iterator {
-            Self::convert_to_pulses(item.into().as_slice(), &mut seq_iter, self.pulses)?;
+            let color = item.into();
+            Self::convert_to_pulses(rgb::bytemuck::bytes_of(&color), &mut seq_iter, self.pulses)?;
         }
         Ok(())
     }
@@ -390,7 +391,7 @@ where
 impl<'ch, const BUFFER_SIZE: usize, Color> SmartLedsWriteAsync
     for SmartLedsAdapterAsync<'ch, BUFFER_SIZE, Color>
 where
-    Color: rgb::ComponentSlice<u8>,
+    Color: rgb::bytemuck::NoUninit,
 {
     type Error = LedAdapterError;
     type Color = Color;

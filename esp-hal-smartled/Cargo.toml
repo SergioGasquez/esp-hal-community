@@ -15,7 +15,7 @@ targets  = ["riscv32imac-unknown-none-elf"]
 defmt             = { version = "^1.0.1", optional = true }
 document-features = "^0.2.12"
 esp-hal           = { version = "~1.1", features = ["requires-unstable"] }
-rgb = "0.8.52"
+rgb = { version = "0.8.52", default-features = false, features = ["bytemuck", "grb"] }
 smart-leds-trait  = "^0.3.2"
 
 [dev-dependencies]
